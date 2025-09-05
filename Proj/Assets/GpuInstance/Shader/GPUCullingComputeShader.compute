@@ -1,0 +1,53 @@
+#pragma kernel CullInstances
+
+// 与C#脚本匹配的数据结构
+struct InstanceData
+{
+    float4 position;
+    float4 color;
+};
+
+// 输入：所有实例的数据
+StructuredBuffer<InstanceData> _AllInstancesData;
+// 输出：一个可追加的缓冲区，用于存储可见实例
+AppendStructuredBuffer<InstanceData> _VisibleInstancesData;
+
+// 从C#传递过来的摄像机视锥平面
+float4 _FrustumPlanes[6];
+float _MaxDistance;
+float4x4 _CameraLocalToWorld;
+float _InstanceRadius;
+
+// 判断一个点是否在所有视锥平面内部
+bool IsInFrustum(float3 worldPos, float radius)
+{
+    float3 cameraPos = _CameraLocalToWorld[3].xyz;
+    if (distance(worldPos, cameraPos) > _MaxDistance)
+    {
+        return false;
+    }
+
+    for (int i = 0; i < 6; i++)
+    {
+        // dot(plane.xyz, pos) + plane.w 计算点到平面的垂直距离
+        if (dot(_FrustumPlanes[i].xyz, worldPos) + _FrustumPlanes[i].w + radius < 0)
+        {
+            return false; // 在视锥外
+        }
+    }
+    return true; // 在视锥内
+}
+
+[numthreads(64, 1, 1)]
+void CullInstances(uint3 id : SV_DispatchThreadID)
+{
+    // 获取当前线程处理的实例数据
+    InstanceData data = _AllInstancesData[id.x];
+
+    // 执行剔除检查
+    if (IsInFrustum(data.position.xyz, _InstanceRadius))
+    {
+        // 如果可见，则将其添加到可见实例的缓冲区中
+        _VisibleInstancesData.Append(data);
+    }
+}
